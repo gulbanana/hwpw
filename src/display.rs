@@ -3,16 +3,17 @@
 use core::cell::RefCell;
 use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
 use embassy_embedded_hal::shared_bus::blocking::spi::SpiDeviceWithConfig;
-use embassy_futures::select::select;
-use embassy_rp::gpio::{AnyPin, Input, Level, Output};
+use embassy_rp::gpio::{AnyPin, Level, Output};
 use embassy_rp::peripherals as p;
 use embassy_rp::spi::{Blocking, Config, Phase, Polarity, Spi};
 use embassy_sync::blocking_mutex::*;
+use embassy_sync::channel::Channel;
 use embassy_time::Delay;
 use embedded_graphics::prelude::*;
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_hal::digital::OutputPin; // could these be embassy hal traits instead?
 use embedded_hal::spi::SpiDevice;
+use raw::ThreadModeRawMutex;
 use st7789::{Orientation, ST7789};
 
 const DISPLAY_FREQ: u32 = 64_000_000;
@@ -24,28 +25,31 @@ pub struct LCDPeripherals {
     pub cs: p::PIN_17,
     pub sclk: p::PIN_18,
     pub mosi: p::PIN_19,
-    pub bl_en: p::PIN_20,
-    pub sw_x: p::PIN_14,
-    pub sw_y: p::PIN_15,
+    pub bl_en: p::PIN_20
+}
+
+pub enum Message {
+    LessBlue,
+    MoreBlue
 }
 
 #[embassy_executor::task]
-pub async fn task(p: LCDPeripherals) {
+pub async fn task(io: LCDPeripherals, msg: &'static Channel<ThreadModeRawMutex, Message, 2>) {
     let mut display_config = Config::default();
     display_config.frequency = DISPLAY_FREQ;
     display_config.phase = Phase::CaptureOnSecondTransition;
     display_config.polarity = Polarity::IdleHigh;
 
     let spi: Spi<'_, _, Blocking> =
-        Spi::new_blocking_txonly(p.spi, p.sclk, p.mosi, display_config.clone());
+        Spi::new_blocking_txonly(io.spi, io.sclk, io.mosi, display_config.clone());
     let spi_bus: Mutex<raw::NoopRawMutex, _> = Mutex::new(RefCell::new(spi));
-    let device = SpiDeviceWithConfig::new(&spi_bus, Output::new(p.cs, Level::High), display_config);
+    let device = SpiDeviceWithConfig::new(&spi_bus, Output::new(io.cs, Level::High), display_config);
 
     // write mode toggle
-    let dc = Output::new(p.dc, Level::Low);
+    let dc = Output::new(io.dc, Level::Low);
 
     // backlight toggle
-    let bl_en = Output::new(p.bl_en, Level::High);
+    let bl_en = Output::new(io.bl_en, Level::High);
 
     // MIPIDSI wrapper
     let mut display = ST7789::new(
@@ -62,22 +66,19 @@ pub async fn task(p: LCDPeripherals) {
     display.init(&mut Delay).unwrap();
     display.set_orientation(Orientation::Landscape).unwrap();
 
-    let mut sw_x = Input::new(p.sw_x, embassy_rp::gpio::Pull::Up);
-    let mut sw_y = Input::new(p.sw_y, embassy_rp::gpio::Pull::Up);
     let mut sat = Rgb565::MAX_B / 2;
-
+    
     loop {
         display.clear(Rgb565::new(0, 0, sat)).unwrap();
- 
-        select(sw_x.wait_for_any_edge(), sw_y.wait_for_any_edge()).await;
-
-        if sw_x.is_high() {
-            sat = sat.saturating_add(1);
-        } 
-
-        if sw_y.is_high() {
-            sat = sat.saturating_sub(1);
-        } 
+        
+        match msg.receive().await {
+            Message::MoreBlue => {
+                sat += 1;
+            },
+            Message::LessBlue => {
+                sat -= 1;
+            }
+        }
     }
 }
 
