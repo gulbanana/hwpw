@@ -17,8 +17,6 @@ async fn main(spawner: embassy_executor::Spawner) {
 
     let mut sw_a = Input::new(io.PIN_12, embassy_rp::gpio::Pull::Up);
     let mut sw_b = Input::new(io.PIN_13, embassy_rp::gpio::Pull::Up);
-    let mut sw_x = Input::new(io.PIN_14, embassy_rp::gpio::Pull::Up);
-    let mut sw_y = Input::new(io.PIN_15, embassy_rp::gpio::Pull::Up);
 
     let lcd = display::LCDPeripherals {
         spi: io.SPI0,
@@ -27,6 +25,8 @@ async fn main(spawner: embassy_executor::Spawner) {
         sclk: io.PIN_18,
         mosi: io.PIN_19,
         bl_en: io.PIN_20,
+        sw_x: io.PIN_14, 
+        sw_y: io.PIN_15
     };
 
     spawner.spawn(display::task(lcd)).unwrap();

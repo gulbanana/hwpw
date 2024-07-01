@@ -3,11 +3,12 @@
 use core::cell::RefCell;
 use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
 use embassy_embedded_hal::shared_bus::blocking::spi::SpiDeviceWithConfig;
-use embassy_rp::gpio::{AnyPin, Level, Output};
+use embassy_futures::select::select;
+use embassy_rp::gpio::{AnyPin, Input, Level, Output};
 use embassy_rp::peripherals as p;
 use embassy_rp::spi::{Blocking, Config, Phase, Polarity, Spi};
 use embassy_sync::blocking_mutex::*;
-use embassy_time::{Delay, Timer};
+use embassy_time::Delay;
 use embedded_graphics::prelude::*;
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_hal::digital::OutputPin; // could these be embassy hal traits instead?
@@ -24,6 +25,8 @@ pub struct LCDPeripherals {
     pub sclk: p::PIN_18,
     pub mosi: p::PIN_19,
     pub bl_en: p::PIN_20,
+    pub sw_x: p::PIN_14,
+    pub sw_y: p::PIN_15,
 }
 
 #[embassy_executor::task]
@@ -57,15 +60,24 @@ pub async fn task(p: LCDPeripherals) {
     );
 
     display.init(&mut Delay).unwrap();
-
     display.set_orientation(Orientation::Landscape).unwrap();
 
-    loop { 
-        display.clear(Rgb565::BLUE).unwrap();
-        Timer::after_secs(1).await;
+    let mut sw_x = Input::new(p.sw_x, embassy_rp::gpio::Pull::Up);
+    let mut sw_y = Input::new(p.sw_y, embassy_rp::gpio::Pull::Up);
+    let mut sat = Rgb565::MAX_B / 2;
 
-        display.clear(Rgb565::BLACK).unwrap();
-        Timer::after_secs(1).await;
+    loop {
+        display.clear(Rgb565::new(0, 0, sat)).unwrap();
+ 
+        select(sw_x.wait_for_any_edge(), sw_y.wait_for_any_edge()).await;
+
+        if sw_x.is_high() {
+            sat = sat.saturating_add(1);
+        } 
+
+        if sw_y.is_high() {
+            sat = sat.saturating_sub(1);
+        } 
     }
 }
 
