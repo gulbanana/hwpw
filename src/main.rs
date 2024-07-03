@@ -14,9 +14,9 @@ static DISPLAY: Channel<ThreadModeRawMutex, display::Message, 2> = Channel::new(
 async fn main(spawner: embassy_executor::Spawner) {
     let io = embassy_rp::init(Default::default());
 
-    let mut led_r = Output::new(io.PIN_6, Level::High);
+    let _led_r = Output::new(io.PIN_6, Level::High);
     let _led_g = Output::new(io.PIN_7, Level::High);
-    let mut led_b = Output::new(io.PIN_8, Level::High);
+    let _led_b = Output::new(io.PIN_8, Level::High);
 
     let mut sw_a = Input::new(io.PIN_12, embassy_rp::gpio::Pull::Up);
     let mut sw_b = Input::new(io.PIN_13, embassy_rp::gpio::Pull::Up);
@@ -36,32 +36,24 @@ async fn main(spawner: embassy_executor::Spawner) {
 
     loop {
         match select4(
-            sw_a.wait_for_any_edge(),
-            sw_b.wait_for_any_edge(),
+            sw_a.wait_for_falling_edge(),
+            sw_b.wait_for_falling_edge(),
             sw_x.wait_for_falling_edge(),
             sw_y.wait_for_falling_edge(),
         )
         .await
         {
             Either4::First(_) => {
-                if sw_a.is_high() {
-                    led_b.set_high(); // could this use PWM?
-                } else {
-                    led_b.set_low();
-                }
+                DISPLAY.send(display::Message::Left).await;
             }
             Either4::Second(_) => {
-                if sw_b.is_high() {
-                    led_r.set_high();
-                } else {
-                    led_r.set_low();
-                }
+                DISPLAY.send(display::Message::Right).await;
             }
             Either4::Third(_) => {
-                DISPLAY.send(display::Message::MoreBlue).await;
+                DISPLAY.send(display::Message::Up).await;
             }
             Either4::Fourth(_) => {
-                DISPLAY.send(display::Message::LessBlue).await;
+                DISPLAY.send(display::Message::Down).await;
             }
         }
     }

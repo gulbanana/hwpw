@@ -3,96 +3,137 @@
 use core::cell::RefCell;
 use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
 use embassy_embedded_hal::shared_bus::blocking::spi::SpiDeviceWithConfig;
-use embassy_rp::gpio::{AnyPin, Level, Output};
-use embassy_rp::peripherals as p;
-use embassy_rp::spi::{Blocking, Config, Phase, Polarity, Spi};
-use embassy_sync::blocking_mutex::*;
-use embassy_sync::channel::Channel;
+use embassy_rp::{
+    gpio::{Level, Output, Pin},
+    peripherals,
+    spi::{Config, Phase, Polarity, Spi},
+};
+use embassy_sync::{
+    blocking_mutex::{
+        raw::{NoopRawMutex, ThreadModeRawMutex},
+        Mutex,
+    },
+    channel::Channel,
+};
 use embassy_time::Delay;
-use embedded_graphics::prelude::*;
-use embedded_graphics::pixelcolor::Rgb565;
-use embedded_hal::digital::OutputPin; // could these be embassy hal traits instead?
-use embedded_hal::spi::SpiDevice;
-use raw::ThreadModeRawMutex;
-use st7789::{Orientation, ST7789};
-
-const DISPLAY_FREQ: u32 = 64_000_000;
+use embedded_graphics::{
+    mono_font::{ascii::FONT_10X20, MonoTextStyle},
+    pixelcolor::Rgb565,
+    prelude::*,
+    text::Text,
+};
+use embedded_hal::spi::SpiDevice; // alternative: SpiDeviceWithConfig<raw::NoopRawMutex, Spi<p::SPI0, Blocking>, Output<p::PIN_17>>
+use mipidsi::{
+    models::ST7789,
+    options::{ColorInversion, Orientation, Rotation, TearingEffect},
+    Builder,
+};
 
 pub struct LCDPeripherals {
-    pub spi: p::SPI0,
-    /// 0 = command, 1 = data
-    pub dc: p::PIN_16,
-    pub cs: p::PIN_17,
-    pub sclk: p::PIN_18,
-    pub mosi: p::PIN_19,
-    pub bl_en: p::PIN_20
+    pub spi: peripherals::SPI0,
+    // wrteonly MIPIDSI
+    pub cs: peripherals::PIN_17,
+    pub sclk: peripherals::PIN_18,
+    pub mosi: peripherals::PIN_19,
+    /// TX mode: 0 = command, 1 = data
+    pub dc: peripherals::PIN_16,
+    /// backlight
+    pub bl_en: peripherals::PIN_20,
 }
 
 pub enum Message {
-    LessBlue,
-    MoreBlue
+    Left,
+    Right,
+    Up,
+    Down,
 }
 
 #[embassy_executor::task]
 pub async fn task(io: LCDPeripherals, msg: &'static Channel<ThreadModeRawMutex, Message, 2>) {
-    let mut display_config = Config::default();
-    display_config.frequency = DISPLAY_FREQ;
-    display_config.phase = Phase::CaptureOnSecondTransition;
-    display_config.polarity = Polarity::IdleHigh;
-
-    let spi: Spi<'_, _, Blocking> =
-        Spi::new_blocking_txonly(io.spi, io.sclk, io.mosi, display_config.clone());
-    let spi_bus: Mutex<raw::NoopRawMutex, _> = Mutex::new(RefCell::new(spi));
-    let device = SpiDeviceWithConfig::new(&spi_bus, Output::new(io.cs, Level::High), display_config);
+    // backlight toggle
+    let _bl_en = Output::new(io.bl_en, Level::High);
 
     // write mode toggle
     let dc = Output::new(io.dc, Level::Low);
 
-    // backlight toggle
-    let bl_en = Output::new(io.bl_en, Level::High);
+    // SPI interface
+    let mut display_config = Config::default();
+    display_config.frequency = 64_000_000u32;
+    display_config.phase = Phase::CaptureOnSecondTransition;
+    display_config.polarity = Polarity::IdleHigh;
 
-    // MIPIDSI wrapper
-    let mut display = ST7789::new(
-        Driver {
-            spi: device,
-            dcx: dc,
-        },
-        None::<Output<AnyPin>>,
-        Some(bl_en),
-        240,
-        135,
-    );
+    let spi = Spi::new_blocking_txonly(io.spi, io.sclk, io.mosi, display_config.clone());
+    let spi_bus: Mutex<NoopRawMutex, _> = Mutex::new(RefCell::new(spi));
+    let configured_spi =
+        SpiDeviceWithConfig::new(&spi_bus, Output::new(io.cs, Level::High), display_config);
 
-    display.init(&mut Delay).unwrap();
-    display.set_orientation(Orientation::Landscape).unwrap();
+    // MIPIDSI interface
+    let interface = DisplayInterface {
+        spi: configured_spi,
+        dcx: dc,
+    };
+    let mut driver = Builder::new(ST7789, interface)
+        .display_size(135, 240)
+        .display_offset(40, 53)
+        .invert_colors(ColorInversion::Inverted)
+        .init(&mut Delay)
+        .unwrap();
 
-    let mut sat = Rgb565::MAX_B / 2;
-    
+    driver
+        .set_orientation(
+            Orientation::default()
+                .rotate(Rotation::Deg270)
+                .flip_vertical()
+                .flip_horizontal(),
+        )
+        .unwrap();
+    driver
+        .set_tearing_effect(TearingEffect::HorizontalAndVertical)
+        .unwrap();
+
+    let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::BLACK);
+    let mut text_x = 60i32;
+    let mut text_y = 15i32;
+
     loop {
-        display.clear(Rgb565::new(0, 0, sat)).unwrap();
-        
+        // three-colour background - fill_solid() and therefore clear() currently doesn't work (might be trying to use size without offset)
+        driver
+            .set_pixels(0, 0, 79, 134, (0..(135u32 * 80u32)).map(|_| Rgb565::GREEN))
+            .unwrap();
+
+        driver
+            .set_pixels(160, 0, 239, 134, (0..(135u32 * 80u32)).map(|_| Rgb565::RED))
+            .unwrap();
+
+        driver
+            .set_pixels(80, 0, 159, 134, (0..(135u32 * 80u32)).map(|_| Rgb565::WHITE))
+            .unwrap();
+
+        // floating text, movable with switches
+        Text::new("Ciao, mondo!", Point::new(text_x, text_y), text_style)
+            .draw(&mut driver)
+            .unwrap();
+
         match msg.receive().await {
-            Message::MoreBlue => {
-                sat += 1;
-            },
-            Message::LessBlue => {
-                sat -= 1;
-            }
+            Message::Left => text_x = text_x - 5,
+            Message::Right => text_x = text_x + 5,
+            Message::Up => text_y = text_y - 5,
+            Message::Down => text_y = text_y + 5,
         }
     }
 }
 
-struct Driver<SPI: SpiDevice, DCX: OutputPin> {
+struct DisplayInterface<'a, SPI: SpiDevice, DCX: Pin> {
     spi: SPI,
-    dcx: DCX,
+    dcx: Output<'a, DCX>,
 }
 
-impl<SPI: SpiDevice, DC: OutputPin> WriteOnlyDataCommand for Driver<SPI, DC> {
+impl<'a, SPI: SpiDevice, DC: Pin> WriteOnlyDataCommand for DisplayInterface<'a, SPI, DC> {
     fn send_commands(
         &mut self,
         cmd: display_interface::DataFormat<'_>,
     ) -> Result<(), display_interface::DisplayError> {
-        self.dcx.set_low().map_err(|_| DisplayError::DCError)?;
+        self.dcx.set_low();
 
         send_bytes(&mut self.spi, cmd).map_err(|_| DisplayError::BusWriteError)?;
         Ok(())
@@ -102,7 +143,7 @@ impl<SPI: SpiDevice, DC: OutputPin> WriteOnlyDataCommand for Driver<SPI, DC> {
         &mut self,
         buf: display_interface::DataFormat<'_>,
     ) -> Result<(), display_interface::DisplayError> {
-        self.dcx.set_high().map_err(|_| DisplayError::DCError)?;
+        self.dcx.set_high();
 
         send_bytes(&mut self.spi, buf).map_err(|_| DisplayError::BusWriteError)?;
         Ok(())
