@@ -10,7 +10,7 @@ use embassy_rp::{
 };
 use embassy_sync::{
     blocking_mutex::{
-        raw::{NoopRawMutex, ThreadModeRawMutex},
+        raw::{NoopRawMutex, CriticalSectionRawMutex},
         Mutex,
     },
     channel::Channel,
@@ -44,12 +44,12 @@ pub struct LCDPeripherals {
 pub enum Message {
     Left,
     Right,
-    Up,
-    Down,
+    _Up,
+    _Down,
 }
 
 #[embassy_executor::task]
-pub async fn task(io: LCDPeripherals, msg: &'static Channel<ThreadModeRawMutex, Message, 2>) {
+pub async fn task(io: LCDPeripherals, msg: &'static Channel<CriticalSectionRawMutex, Message, 2>) {
     // backlight toggle
     let _bl_en = Output::new(io.bl_en, Level::High);
 
@@ -117,8 +117,8 @@ pub async fn task(io: LCDPeripherals, msg: &'static Channel<ThreadModeRawMutex, 
         match msg.receive().await {
             Message::Left => text_x = text_x - 5,
             Message::Right => text_x = text_x + 5,
-            Message::Up => text_y = text_y - 5,
-            Message::Down => text_y = text_y + 5,
+            Message::_Up => text_y = text_y - 5,
+            Message::_Down => text_y = text_y + 5,
         }
     }
 }
