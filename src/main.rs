@@ -6,7 +6,7 @@ mod display;
 use embassy_futures::select::{select4, Either4};
 use embassy_rp::gpio::{Input, Level, Output};
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
-use {defmt_rtt as _, panic_probe as _};
+use panic_probe as _;
 
 static DISPLAY: Channel<ThreadModeRawMutex, display::Message, 2> = Channel::new();
 
