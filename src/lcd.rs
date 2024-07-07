@@ -1,6 +1,6 @@
 //! Driver for the Pimoroni Pico Display Pack, an ST7789-based SPI LCD
 
-use core::cell::RefCell;
+use core::{cell::RefCell, str::from_utf8};
 use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
 use embassy_embedded_hal::shared_bus::blocking::spi::SpiDeviceWithConfig;
 use embassy_rp::{
@@ -45,6 +45,7 @@ pub struct LCDPeripherals {
 
 pub enum Message {
     Lock,
+    SetName(&'static [u8; 4]),
 }
 
 #[embassy_executor::task]
@@ -95,12 +96,18 @@ pub async fn task(io: LCDPeripherals, msg: &'static Channel<CriticalSectionRawMu
     let credentials_image = Image::new(&credentials_data, Point::new(86, 191));
     let password_image = Image::new(&password_data, Point::new(0, 191));
 
-    // this weird rotation dance is to work around bugs in mipidsi - if reoriented, 
+    // ui state
+    let mut name: &'static [u8; 4] = b"INIT";
+
+    // this weird rotation dance is to work around bugs in mipidsi - if reoriented,
     // it can't fill or draw all the way to the right, and offsets are wrong
     loop {
-        driver
-            .set_orientation(Orientation::default())
-            .unwrap();
+        match msg.receive().await {
+            Message::Lock => bl_en.toggle(),
+            Message::SetName(n) => name = n,
+        }
+
+        driver.set_orientation(Orientation::default()).unwrap();
 
         driver.clear(Rgb565::BLACK).unwrap();
 
@@ -110,19 +117,15 @@ pub async fn task(io: LCDPeripherals, msg: &'static Channel<CriticalSectionRawMu
         driver
             .set_orientation(Orientation::default().rotate(Rotation::Deg90))
             .unwrap();
-        
+
         // switch icons
         lock_image.draw(&mut driver).unwrap();
         rotate_image.draw(&mut driver).unwrap();
 
         // selected password name
-        Text::new("DPLH", Point::new(78, 87), text_style)
+        Text::new(from_utf8(name).unwrap(), Point::new(78, 87), text_style)
             .draw(&mut driver)
             .unwrap();
-
-        match msg.receive().await {
-            Message::Lock => bl_en.toggle(),
-        }
     }
 }
 

@@ -2,11 +2,13 @@
 #![no_main]
 
 mod lcd;
+mod secrets;
 mod usb;
 
 use embassy_futures::select::{select4, Either4};
 use embassy_rp::gpio::{Input, Level, Output};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+use embassy_time::Timer;
 use panic_probe as _;
 
 static LCD: Channel<CriticalSectionRawMutex, lcd::Message, 2> = Channel::new();
@@ -37,6 +39,10 @@ async fn main(spawner: embassy_executor::Spawner) {
     spawner.spawn(lcd::task(lcd, &LCD)).unwrap();
     spawner.spawn(usb::task(io.USB, &USB)).unwrap();
 
+    let mut ix = 0;
+    LCD.send(lcd::Message::SetName(&secrets::DISPLAY_NAMES[ix]))
+        .await;
+
     loop {
         match select4(
             sw_a.wait_for_falling_edge(),
@@ -49,13 +55,23 @@ async fn main(spawner: embassy_executor::Spawner) {
             Either4::First(_) => {
                 LCD.send(lcd::Message::Lock).await;
             }
-            Either4::Second(_) => (),
+            Either4::Second(_) => {
+                ix = (ix + 1) % secrets::COUNT;
+                LCD.send(lcd::Message::SetName(&secrets::DISPLAY_NAMES[ix]))
+                    .await;
+            }
             Either4::Third(_) => {
-                USB.send(usb::Message::X).await;
+                let username = secrets::USERNAMES[ix];
+                let password = secrets::PASSWORDS[ix];
+                USB.send(usb::Message::Credentials { username, password })
+                    .await;
             }
             Either4::Fourth(_) => {
-                USB.send(usb::Message::Y).await;
+                let password = secrets::PASSWORDS[ix];
+                USB.send(usb::Message::Password { password }).await;
             }
         }
+
+        Timer::after_millis(400).await; // world's dumbest debounce
     }
 }
