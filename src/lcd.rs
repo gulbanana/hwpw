@@ -10,14 +10,15 @@ use embassy_rp::{
 };
 use embassy_sync::{
     blocking_mutex::{
-        raw::{NoopRawMutex, CriticalSectionRawMutex},
+        raw::{CriticalSectionRawMutex, NoopRawMutex},
         Mutex,
     },
     channel::Channel,
 };
 use embassy_time::Delay;
 use embedded_graphics::{
-    mono_font::{ascii::FONT_10X20, MonoTextStyle},
+    image::{Image, ImageRawLE},
+    mono_font::MonoTextStyle,
     pixelcolor::Rgb565,
     prelude::*,
     text::Text,
@@ -28,6 +29,7 @@ use mipidsi::{
     options::{ColorInversion, Orientation, Rotation, TearingEffect},
     Builder,
 };
+use profont;
 
 pub struct LCDPeripherals {
     pub spi: peripherals::SPI0,
@@ -42,23 +44,20 @@ pub struct LCDPeripherals {
 }
 
 pub enum Message {
-    Left,
-    Right,
-    _Up,
-    _Down,
+    Lock,
 }
 
 #[embassy_executor::task]
 pub async fn task(io: LCDPeripherals, msg: &'static Channel<CriticalSectionRawMutex, Message, 2>) {
     // backlight toggle
-    let _bl_en = Output::new(io.bl_en, Level::High);
+    let mut bl_en = Output::new(io.bl_en, Level::High);
 
     // write mode toggle
     let dc = Output::new(io.dc, Level::Low);
 
     // SPI interface
     let mut display_config = Config::default();
-    display_config.frequency = 64_000_000u32;
+    display_config.frequency = 62_500_000u32;
     display_config.phase = Phase::CaptureOnSecondTransition;
     display_config.polarity = Polarity::IdleHigh;
 
@@ -74,51 +73,55 @@ pub async fn task(io: LCDPeripherals, msg: &'static Channel<CriticalSectionRawMu
     };
     let mut driver = Builder::new(ST7789, interface)
         .display_size(135, 240)
-        .display_offset(40, 53)
+        .display_offset(52, 40)
         .invert_colors(ColorInversion::Inverted)
         .init(&mut Delay)
         .unwrap();
 
     driver
-        .set_orientation(
-            Orientation::default()
-                .rotate(Rotation::Deg270)
-                .flip_vertical()
-                .flip_horizontal(),
-        )
-        .unwrap();
-    driver
         .set_tearing_effect(TearingEffect::HorizontalAndVertical)
         .unwrap();
 
-    let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::BLACK);
-    let mut text_x = 60i32;
-    let mut text_y = 15i32;
+    // ui assets
+    let text_style = MonoTextStyle::new(&profont::PROFONT_24_POINT, Rgb565::WHITE);
 
+    let lock_data = ImageRawLE::new(include_bytes!("../images/lock-48x48.raw"), 48);
+    let rotate_data = ImageRawLE::new(include_bytes!("../images/rotate-48x48.raw"), 48);
+    let credentials_data = ImageRawLE::new(include_bytes!("../images/credentials-48x48.raw"), 48);
+    let password_data = ImageRawLE::new(include_bytes!("../images/password-48x48.raw"), 48);
+
+    let lock_image = Image::new(&lock_data, Point::new(0, 12));
+    let rotate_image = Image::new(&rotate_data, Point::new(0, 100));
+    let credentials_image = Image::new(&credentials_data, Point::new(86, 191));
+    let password_image = Image::new(&password_data, Point::new(0, 191));
+
+    // this weird rotation dance is to work around bugs in mipidsi - if reoriented, 
+    // it can't fill or draw all the way to the right, and offsets are wrong
     loop {
-        // three-colour background - fill_solid() and therefore clear() currently doesn't work (might be trying to use size without offset)
         driver
-            .set_pixels(0, 0, 79, 134, (0..(135u32 * 80u32)).map(|_| Rgb565::GREEN))
+            .set_orientation(Orientation::default())
             .unwrap();
 
-        driver
-            .set_pixels(160, 0, 239, 134, (0..(135u32 * 80u32)).map(|_| Rgb565::RED))
-            .unwrap();
+        driver.clear(Rgb565::BLACK).unwrap();
+
+        credentials_image.draw(&mut driver).unwrap();
+        password_image.draw(&mut driver).unwrap();
 
         driver
-            .set_pixels(80, 0, 159, 134, (0..(135u32 * 80u32)).map(|_| Rgb565::WHITE))
+            .set_orientation(Orientation::default().rotate(Rotation::Deg90))
             .unwrap();
+        
+        // switch icons
+        lock_image.draw(&mut driver).unwrap();
+        rotate_image.draw(&mut driver).unwrap();
 
-        // floating text, movable with switches
-        Text::new("Ciao, mondo!", Point::new(text_x, text_y), text_style)
+        // selected password name
+        Text::new("DPLH", Point::new(78, 87), text_style)
             .draw(&mut driver)
             .unwrap();
 
         match msg.receive().await {
-            Message::Left => text_x = text_x - 5,
-            Message::Right => text_x = text_x + 5,
-            Message::_Up => text_y = text_y - 5,
-            Message::_Down => text_y = text_y + 5,
+            Message::Lock => bl_en.toggle(),
         }
     }
 }

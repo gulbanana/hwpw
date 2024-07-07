@@ -47,11 +47,9 @@ async fn main(spawner: embassy_executor::Spawner) {
         .await
         {
             Either4::First(_) => {
-                LCD.send(lcd::Message::Left).await;
+                LCD.send(lcd::Message::Lock).await;
             }
-            Either4::Second(_) => {
-                LCD.send(lcd::Message::Right).await;
-            }
+            Either4::Second(_) => (),
             Either4::Third(_) => {
                 USB.send(usb::Message::X).await;
             }

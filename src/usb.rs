@@ -1,15 +1,21 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use embassy_futures::join::join;
-use embassy_rp::{bind_interrupts, peripherals::USB, usb::{Driver, InterruptHandler}};
+use embassy_rp::{
+    bind_interrupts,
+    peripherals::USB,
+    usb::{Driver, InterruptHandler},
+};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
-use embassy_usb::{class::hid::{self, HidWriter}, Builder, Config, Handler};
+use embassy_usb::{
+    class::hid::{self, HidWriter},
+    Builder, Config, Handler,
+};
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
-pub enum Message
-{
+pub enum Message {
     X,
-    Y
+    Y,
 }
 
 #[embassy_executor::task]
@@ -48,7 +54,7 @@ pub async fn task(io: USB, msg: &'static Channel<CriticalSectionRawMutex, Messag
         &mut bos_descriptor,
         &mut msos_descriptor,
         &mut control_buf,
-    );    
+    );
     builder.handler(&mut control_handler);
     let mut hid = HidWriter::<_, 8>::new(&mut builder, &mut hid_state, hid_config);
     let mut device = builder.build();
@@ -59,8 +65,8 @@ pub async fn task(io: USB, msg: &'static Channel<CriticalSectionRawMutex, Messag
         loop {
             match msg.receive().await {
                 Message::X => send_key(&mut hid, 0x1b).await,
-                Message::Y => send_key(&mut hid, 0x1c).await
-            }    
+                Message::Y => send_key(&mut hid, 0x1c).await,
+            }
         }
     };
 
@@ -77,7 +83,7 @@ impl Handler for ControlHandler {
     fn reset(&mut self) {
         self.0.store(false, Ordering::Relaxed);
     }
-    
+
     fn enabled(&mut self, _enabled: bool) {
         self.0.store(false, Ordering::Relaxed);
     }
@@ -106,5 +112,5 @@ async fn send_key<'a>(hid: &mut HidWriter<'a, Driver<'a, USB>, 8>, code: u8) {
         modifier: 0,
         reserved: 0,
     };
-    hid.write_serialize(&report).await.unwrap();            
+    hid.write_serialize(&report).await.unwrap();
 }
