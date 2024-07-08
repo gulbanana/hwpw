@@ -8,7 +8,7 @@ mod usb;
 use embassy_futures::select::{select4, Either4};
 use embassy_rp::gpio::{Input, Level, Output, Pin};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Duration, Instant};
 use panic_probe as _;
 
 static LCD: Channel<CriticalSectionRawMutex, lcd::Message, 2> = Channel::new();
@@ -122,8 +122,12 @@ impl<'a, T: Pin> Debounced<'a, T> {
     }
 
     async fn debounce(&mut self) {
-        self.input.wait_for_falling_edge().await;
-        Timer::at(self.deadline).await;
-        self.deadline = Instant::now() + Duration::from_millis(400);
+        loop {
+            self.input.wait_for_falling_edge().await;
+            if Instant::now() >= self.deadline {
+                self.deadline = Instant::now() + Duration::from_millis(400);
+                break;
+            }
+        }
     }
 }
