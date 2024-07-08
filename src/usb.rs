@@ -1,5 +1,8 @@
-use core::sync::atomic::{AtomicBool, Ordering};
-
+use crate::debounce::{Debounced, Debouncy};
+use core::{
+    future::Future,
+    sync::atomic::{AtomicBool, Ordering},
+};
 use embassy_futures::join::join;
 use embassy_rp::{
     bind_interrupts,
@@ -7,7 +10,6 @@ use embassy_rp::{
     usb::{Driver, InterruptHandler},
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
-use embassy_time::{Duration, Instant};
 use embassy_usb::{
     class::hid::{self, HidWriter},
     Builder, Config, Handler,
@@ -70,7 +72,7 @@ pub async fn task(io: USB, msg: &'static Channel<CriticalSectionRawMutex, Messag
 
     let msg_future = async {
         let mut keyboard = Keyboard::new(&mut hid);
-        let mut msg = Debounced::new(msg);
+        let mut msg = Debounced::new(msg, 1200);
         loop {
             match msg.debounce().await {
                 Message::Credentials { username, password } => {
@@ -90,27 +92,11 @@ pub async fn task(io: USB, msg: &'static Channel<CriticalSectionRawMutex, Messag
     join(usb_future, msg_future).await;
 }
 
-struct Debounced<'a, T> {
-    channel: &'a Channel<CriticalSectionRawMutex, T, 2>,
-    deadline: Instant,
-}
+impl<T> Debouncy for &Channel<CriticalSectionRawMutex, T, 2> {
+    type Output = T;
 
-impl<'a, T> Debounced<'a, T> {
-    fn new(input: &'a Channel<CriticalSectionRawMutex, T, 2>) -> Self {
-        Debounced {
-            channel: input,
-            deadline: Instant::now(),
-        }
-    }
-
-    async fn debounce(&mut self) -> T {
-        loop {
-            let message = self.channel.receive().await;
-            if Instant::now() >= self.deadline {
-                self.deadline = Instant::now() + Duration::from_millis(1200);
-                return message;
-            }
-        }
+    fn read(&mut self) -> impl Future<Output = T> {
+        self.receive()
     }
 }
 

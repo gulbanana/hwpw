@@ -1,14 +1,16 @@
 #![no_std]
 #![no_main]
 
+mod debounce;
 mod lcd;
 mod secrets;
 mod usb;
 
+use core::future::Future;
+use debounce::{Debounced, Debouncy};
 use embassy_futures::select::{select4, Either4};
 use embassy_rp::gpio::{Input, Level, Output, Pin};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
-use embassy_time::{Duration, Instant};
 use panic_probe as _;
 
 static LCD: Channel<CriticalSectionRawMutex, lcd::Message, 2> = Channel::new();
@@ -22,10 +24,10 @@ async fn main(spawner: embassy_executor::Spawner) {
     let _led_g = Output::new(io.PIN_7, Level::High);
     let _led_b = Output::new(io.PIN_8, Level::High);
 
-    let mut sw_a = Debounced::new(Input::new(io.PIN_12, embassy_rp::gpio::Pull::Up));
-    let mut sw_b = Debounced::new(Input::new(io.PIN_13, embassy_rp::gpio::Pull::Up));
-    let mut sw_x = Debounced::new(Input::new(io.PIN_14, embassy_rp::gpio::Pull::Up));
-    let mut sw_y = Debounced::new(Input::new(io.PIN_15, embassy_rp::gpio::Pull::Up));
+    let mut sw_a = Debounced::new(Input::new(io.PIN_12, embassy_rp::gpio::Pull::Up), 400);
+    let mut sw_b = Debounced::new(Input::new(io.PIN_13, embassy_rp::gpio::Pull::Up), 400);
+    let mut sw_x = Debounced::new(Input::new(io.PIN_14, embassy_rp::gpio::Pull::Up), 400);
+    let mut sw_y = Debounced::new(Input::new(io.PIN_15, embassy_rp::gpio::Pull::Up), 400);
 
     let lcd = lcd::LCDPeripherals {
         spi: io.SPI0,
@@ -108,26 +110,10 @@ async fn main(spawner: embassy_executor::Spawner) {
     }
 }
 
-struct Debounced<'a, T: Pin> {
-    input: Input<'a, T>,
-    deadline: Instant,
-}
+impl<'a, T: Pin> Debouncy for Input<'a, T> {
+    type Output = ();
 
-impl<'a, T: Pin> Debounced<'a, T> {
-    fn new(input: Input<'a, T>) -> Self {
-        Debounced {
-            input,
-            deadline: Instant::now(),
-        }
-    }
-
-    async fn debounce(&mut self) {
-        loop {
-            self.input.wait_for_falling_edge().await;
-            if Instant::now() >= self.deadline {
-                self.deadline = Instant::now() + Duration::from_millis(400);
-                break;
-            }
-        }
+    fn read(&mut self) -> impl Future<Output = ()> {
+        self.wait_for_falling_edge()
     }
 }
