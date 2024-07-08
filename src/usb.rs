@@ -7,6 +7,7 @@ use embassy_rp::{
     usb::{Driver, InterruptHandler},
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+use embassy_time::{Duration, Instant};
 use embassy_usb::{
     class::hid::{self, HidWriter},
     Builder, Config, Handler,
@@ -37,7 +38,7 @@ pub async fn task(io: USB, msg: &'static Channel<CriticalSectionRawMutex, Messag
     // stack config
     let mut config = Config::new(0xc0de, 0xcafe);
     config.manufacturer = Some("Bananasoft");
-    config.product = Some("Password manager");
+    config.product = Some("Password Manager");
     config.serial_number = Some("00000001");
     config.max_power = 100;
     config.max_packet_size_0 = 64;
@@ -69,8 +70,9 @@ pub async fn task(io: USB, msg: &'static Channel<CriticalSectionRawMutex, Messag
 
     let msg_future = async {
         let mut keyboard = Keyboard::new(&mut hid);
+        let mut msg = Debounced::new(msg);
         loop {
-            match msg.receive().await {
+            match msg.debounce().await {
                 Message::Credentials { username, password } => {
                     keyboard.send_str(username).await;
                     keyboard.send_key(KeyboardTab as u8, false).await;
@@ -86,6 +88,30 @@ pub async fn task(io: USB, msg: &'static Channel<CriticalSectionRawMutex, Messag
     };
 
     join(usb_future, msg_future).await;
+}
+
+struct Debounced<'a, T> {
+    channel: &'a Channel<CriticalSectionRawMutex, T, 2>,
+    deadline: Instant,
+}
+
+impl<'a, T> Debounced<'a, T> {
+    fn new(input: &'a Channel<CriticalSectionRawMutex, T, 2>) -> Self {
+        Debounced {
+            channel: input,
+            deadline: Instant::now(),
+        }
+    }
+
+    async fn debounce(&mut self) -> T {
+        loop {
+            let message = self.channel.receive().await;
+            if Instant::now() >= self.deadline {
+                self.deadline = Instant::now() + Duration::from_millis(1200);
+                return message;
+            }
+        }
+    }
 }
 
 bind_interrupts!(struct Irqs {
