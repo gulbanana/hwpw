@@ -12,6 +12,7 @@ use embassy_futures::select::{select4, Either4};
 use embassy_rp::gpio::{Input, Level, Output, Pin};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use panic_probe as _;
+use secrets::CODE_LENGTH;
 
 static LCD: Channel<CriticalSectionRawMutex, lcd::Message, 2> = Channel::new();
 static USB: Channel<CriticalSectionRawMutex, usb::Message, 2> = Channel::new();
@@ -43,11 +44,11 @@ async fn main(spawner: embassy_executor::Spawner) {
 
     // app state: current selected password, sliding window for unlock code
     let mut unlocked = false;
-    let mut code_window = [0u8, 0, 0, 0];
+    let mut code_window = [0u8; CODE_LENGTH];
     let mut cred_ix = 0;
     let mut code_ix = 0;
 
-    LCD.send(lcd::Message::SetName(&secrets::DISPLAY_NAMES[cred_ix]))
+    LCD.send(lcd::Message::SetName(&secrets::PASS_NAMES[cred_ix]))
         .await;
 
     loop {
@@ -67,18 +68,18 @@ async fn main(spawner: embassy_executor::Spawner) {
                     LCD.send(lcd::Message::Lock).await;
                 }
                 Either4::Second(_) => {
-                    cred_ix = (cred_ix + 1) % secrets::COUNT;
-                    LCD.send(lcd::Message::SetName(&secrets::DISPLAY_NAMES[cred_ix]))
+                    cred_ix = (cred_ix + 1) % secrets::PASS_COUNT;
+                    LCD.send(lcd::Message::SetName(&secrets::PASS_NAMES[cred_ix]))
                         .await;
                 }
                 Either4::Third(_) => {
-                    let username = secrets::USERNAMES[cred_ix];
-                    let password = secrets::PASSWORDS[cred_ix];
+                    let username = secrets::PASS_USERS[cred_ix];
+                    let password = secrets::PASS_WORDS[cred_ix];
                     USB.send(usb::Message::Credentials { username, password })
                         .await;
                 }
                 Either4::Fourth(_) => {
-                    let password = secrets::PASSWORDS[cred_ix];
+                    let password = secrets::PASS_WORDS[cred_ix];
                     USB.send(usb::Message::Password { password }).await;
                 }
             }
@@ -93,14 +94,14 @@ async fn main(spawner: embassy_executor::Spawner) {
             };
 
             code_window[code_ix] = code_element;
-            code_ix = (code_ix + 1) % code_window.len();
+            code_ix = (code_ix + 1) % CODE_LENGTH;
 
-            let sliding_window = code_window[code_ix..=3]
+            let sliding_window = code_window[code_ix..=(CODE_LENGTH - 1)]
                 .iter()
                 .chain(code_window[0..code_ix].iter());
 
-            if secrets::PASSCODE.iter().eq(sliding_window) {
-                code_window = [0, 0, 0, 0];
+            if secrets::CODE_BUTTONS.iter().eq(sliding_window) {
+                code_window = [0; CODE_LENGTH];
                 unlocked = true;
                 LCD.send(lcd::Message::Unlock).await;
             } else {
