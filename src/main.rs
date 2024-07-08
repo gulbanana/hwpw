@@ -115,9 +115,9 @@ struct Debounced<'a, T: Pin> {
 
 impl<'a, T: Pin> Debounced<'a, T> {
     fn new(input: Input<'a, T>) -> Self {
-        Debounced { 
+        Debounced {
             input,
-            deadline: Instant::now()
+            deadline: Instant::now(),
         }
     }
 

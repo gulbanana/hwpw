@@ -98,7 +98,7 @@ pub async fn task(io: LCDPeripherals, msg: &'static Channel<CriticalSectionRawMu
     let credentials_image = Image::new(&credentials_data, Point::new(86, 191));
     let password_image = Image::new(&password_data, Point::new(0, 191));
     let locked_image = Image::new(&locked_data, Point::new(43, 95));
-    
+
     let mut state = UIState {
         backlight: bl_en,
         snooze_at: None,
@@ -109,12 +109,10 @@ pub async fn task(io: LCDPeripherals, msg: &'static Channel<CriticalSectionRawMu
     loop {
         match state.snooze_at {
             None => state.handle_message(msg.receive().await),
-            Some(deadline) => {
-                match select(msg.receive(), Timer::at(deadline)).await {
-                    Either::First(message) => state.handle_message(message),
-                    Either::Second(_) => state.handle_snooze()
-                }
-            }
+            Some(deadline) => match select(msg.receive(), Timer::at(deadline)).await {
+                Either::First(message) => state.handle_message(message),
+                Either::Second(_) => state.handle_snooze(),
+            },
         }
 
         // this weird rotation dance is to work around bugs in mipidsi - if reoriented,
@@ -141,14 +139,14 @@ pub async fn task(io: LCDPeripherals, msg: &'static Channel<CriticalSectionRawMu
             rotate_image.draw(&mut driver).unwrap();
 
             // selected password name
-            let x = if state.cred_name[0] == b' ' {
-                70
-            } else {
-                78
-            };
-            Text::new(from_utf8(state.cred_name).unwrap(), Point::new(x, 87), text_style)
-                .draw(&mut driver)
-                .unwrap();
+            let x = if state.cred_name[0] == b' ' { 70 } else { 78 };
+            Text::new(
+                from_utf8(state.cred_name).unwrap(),
+                Point::new(x, 87),
+                text_style,
+            )
+            .draw(&mut driver)
+            .unwrap();
         }
     }
 }
@@ -157,7 +155,7 @@ struct UIState<'a> {
     backlight: Output<'a, PIN_20>,
     snooze_at: Option<Instant>,
     cred_name: &'static [u8; 4],
-    unlocked: bool
+    unlocked: bool,
 }
 
 impl UIState<'_> {
@@ -167,7 +165,7 @@ impl UIState<'_> {
             Message::Lock => {
                 self.unlocked = false;
                 self.snooze_at = Some(Instant::now() + Duration::from_secs(4));
-            },
+            }
             Message::Unlock => {
                 self.unlocked = true;
                 self.snooze_at = None;
@@ -176,12 +174,12 @@ impl UIState<'_> {
             Message::Wake => {
                 if self.snooze_at.is_none() {
                     self.backlight.set_high();
-                } 
+                }
                 self.snooze_at = Some(Instant::now() + Duration::from_secs(4));
             }
         }
     }
-    
+
     fn handle_snooze(&mut self) {
         if self.snooze_at.is_some() {
             self.snooze_at = None;
