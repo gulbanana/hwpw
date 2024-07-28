@@ -4,7 +4,10 @@ runner = "elf2uf2-rs --deploy --verbose"
 #runner = "elf2uf2-rs --deploy --verbose --serial"
 
 [build]
-target = "thumbv6m-none-eabi"        # Cortex-M0 and Cortex-M0+
+target = "thumbv6m-none-eabi" # Cortex-M0 and Cortex-M0+
+
+[alias]
+localtest = "test --lib --target=x86_64-pc-windows-msvc"
 
 [env]
 DEFMT_LOG = "debug"

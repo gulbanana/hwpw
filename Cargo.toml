@@ -1,8 +1,6 @@
-[package]
-edition = "2021"
-name = "hwpw"
-version = "1.0.0"
-license = "GPL-3.0"
+[workspace]
+resolver = "2"
+members = ["firmware", "etpwtc"]
 
 [profile.release]
 lto = true
@@ -10,29 +8,3 @@ opt-level = "s"
 incremental = false
 codegen-units = 1
 debug = 2
-
-[dependencies]
-embassy-embedded-hal = "0.1.0"
-embassy-executor = { version = "0.5.0", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", "integrated-timers"] }
-embassy-futures = "0.1.1"
-embassy-rp = { version = "0.1.0", features = ["critical-section-impl", "intrinsics", "unstable-pac", "time-driver"] }
-embassy-sync = "0.5.0"
-embassy-time = "0.3.1"
-embassy-usb = "0.2.0"
-
-# framework deps
-byte-slice-cast = { version = "1.2.0", default-features = false }
-cortex-m = { version = "0.7.6", features = ["inline-asm"] }
-cortex-m-rt = "0.7.0"
-panic-probe = "0.3.2"
-
-# display deps
-display-interface = "0.5.0"
-display-interface-spi = "0.5.0"
-embedded-graphics = "0.8.1"
-embedded-hal = { version = "1.0" } # just here to use SpiDevice.write(), could probably be removed
-mipidsi = "0.8.0"
-profont = "0.7.0"
-
-# usb deps
-usbd-hid = "0.7.0"

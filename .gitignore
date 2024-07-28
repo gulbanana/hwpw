@@ -1,2 +1,2 @@
 target/
-src/secrets.rs
+firmware/src/secrets.rs
