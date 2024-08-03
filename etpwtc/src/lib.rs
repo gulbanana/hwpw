@@ -28,25 +28,9 @@ impl Parse for Encrypted {
     }
 }
 
-struct ByteSlice<'a>(&'a [u8]);
+struct ByteArray<'a>(&'a [u8]);
 
-impl ToTokens for ByteSlice<'_> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        tokens.append(Punct::new('&', Spacing::Joint));
-
-        let mut elements = TokenStream::new();
-        for b in self.0.iter() {
-            b.to_tokens(&mut elements);
-            elements.append(Punct::new(',', Spacing::Alone));
-        }
-
-        tokens.append(Group::new(proc_macro2::Delimiter::Bracket, elements));
-    }
-}
-
-struct ByteArray<const N: usize>([u8; N]);
-
-impl<const N: usize> ToTokens for ByteArray<N> {
+impl ToTokens for ByteArray<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let mut elements = TokenStream::new();
         for b in self.0.iter() {
@@ -67,19 +51,24 @@ pub fn encrypted(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     } = parse_macro_input!(input as Encrypted);
 
     let mut endec = Endec::new(context.base10_parse().unwrap());
-    let Secret { nonce, ciphertext } = endec
-        .enc(
+    let Secret {
+        nonce,
+        len,
+        ciphertext,
+    } = endec
+        .enc::<64>(
             &Endec::make_key(key.value().as_slice()),
             plaintext.value().as_slice(),
         )
         .unwrap();
 
-    let nonce = ByteArray(nonce);
-    let ciphertext = ByteSlice(ciphertext);
+    let nonce = ByteArray(&nonce);
+    let ciphertext = ByteArray(ciphertext.as_slice());
 
     let output = quote! {
         endec::Secret {
             nonce: #nonce,
+            len: #len,
             ciphertext: #ciphertext
         }
     };

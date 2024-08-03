@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod tests;
 
+pub use chacha20poly1305::aead::heapless;
 use chacha20poly1305::{
     aead::{heapless::Vec, AeadMutInPlace, KeyInit},
     ChaCha20Poly1305, Nonce,
@@ -12,18 +13,20 @@ use chacha20poly1305::{
 pub enum EndecError {
     InvalidKeyLength,
     InsufficientBufferCapacity,
+    IncorrectArraySize,
     DecryptionFailed,
 }
 
 pub struct Endec {
-    scratch: Vec<u8, 64>, // enough for anybody
-    context: u8,          // prevents code replay,
-    counter: [u8; 12],    // generates unique nonces
+    context: u8,       // prevents code replay,
+    counter: [u8; 12], // generates unique nonces
 }
 
-pub struct Secret<'a> {
+#[derive(Clone)]
+pub struct Secret<const N: usize> {
     pub nonce: [u8; 12],
-    pub ciphertext: &'a [u8],
+    pub len: usize,
+    pub ciphertext: [u8; N],
 }
 
 impl Endec {
@@ -39,52 +42,64 @@ impl Endec {
 
     pub fn new(associated_data: u8) -> Self {
         Endec {
-            scratch: Vec::new(),
             context: associated_data,
             counter: [0; 12],
         }
     }
 
-    pub fn enc(&mut self, key: &[u8; 32], plaintext: &[u8]) -> Result<Secret, EndecError> {
+    pub fn enc<const N: usize>(
+        &mut self,
+        key: &[u8; 32],
+        plaintext: &[u8],
+    ) -> Result<Secret<N>, EndecError> {
         let nonce = Nonce::clone_from_slice(&self.counter);
 
-        self.scratch.clear();
-        self.scratch
-            .extend_from_slice(plaintext)
-            .map_err(|_| EndecError::InsufficientBufferCapacity)?;
+        let mut scratch: Vec<u8, N> =
+            Vec::from_slice(plaintext).map_err(|_| EndecError::InsufficientBufferCapacity)?;
 
         let mut cipher =
             ChaCha20Poly1305::new_from_slice(key).map_err(|_| EndecError::InvalidKeyLength)?;
 
         cipher
-            .encrypt_in_place(&nonce, &[self.context], &mut self.scratch)
+            .encrypt_in_place(&nonce, &[self.context], &mut scratch)
             .map_err(|_| EndecError::InsufficientBufferCapacity)?;
+
+        let len = scratch.len();
+        unsafe {
+            scratch.set_len(N);
+        }
 
         let message = Secret {
             nonce: self.counter.clone(),
-            ciphertext: &self.scratch.as_slice(),
+            len,
+            ciphertext: scratch
+                .into_array()
+                .map_err(|_| EndecError::IncorrectArraySize)?,
         };
         increment_nonce(&mut self.counter);
 
         Ok(message)
     }
 
-    pub fn dec(&mut self, key: &[u8; 32], message: &Secret) -> Result<&[u8], EndecError> {
+    pub fn dec<const N: usize>(
+        &mut self,
+        key: &[u8; 32],
+        message: &Secret<N>,
+    ) -> Result<Vec<u8, N>, EndecError> {
         let nonce = Nonce::clone_from_slice(&message.nonce);
 
-        self.scratch.clear();
-        self.scratch
-            .extend_from_slice(message.ciphertext)
+        let mut scratch = Vec::from_slice(&message.ciphertext)
             .map_err(|_| EndecError::InsufficientBufferCapacity)?;
+        scratch.truncate(message.len);
 
         let mut cipher =
             ChaCha20Poly1305::new_from_slice(key).map_err(|_| EndecError::InvalidKeyLength)?;
 
         cipher
-            .decrypt_in_place(&nonce, &[self.context], &mut self.scratch)
+            .decrypt_in_place(&nonce, &[self.context], &mut scratch)
             .map_err(|_| EndecError::DecryptionFailed)?;
 
-        Ok(&self.scratch.as_slice())
+        Ok(scratch)
     }
 }
 

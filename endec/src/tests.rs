@@ -9,14 +9,8 @@ fn roundtrip_same_instance() {
     let plaintext = b"secret";
 
     let message = endec
-        .enc(b"01234567890123456789012345678901", plaintext)
+        .enc::<32>(b"01234567890123456789012345678901", plaintext)
         .unwrap();
-
-    let buffer: Vec<u8, 64> = Vec::from_slice(message.ciphertext).unwrap();
-    let message = Secret {
-        nonce: message.nonce,
-        ciphertext: buffer.as_slice(),
-    };
 
     let replaintext = endec
         .dec(b"01234567890123456789012345678901", &message)
@@ -32,7 +26,7 @@ fn roundtrip_separate_instances() {
     let plaintext = b"secret";
 
     let message = endec1
-        .enc(b"01234567890123456789012345678901", plaintext)
+        .enc::<32>(b"01234567890123456789012345678901", plaintext)
         .unwrap();
 
     let mut endec2 = Endec::new(0);
@@ -51,7 +45,7 @@ fn incorrect_tag() {
     let plaintext = b"secret";
 
     let message = endec1
-        .enc(b"01234567890123456789012345678901", plaintext)
+        .enc::<32>(b"01234567890123456789012345678901", plaintext)
         .unwrap();
 
     let mut endec2 = Endec::new(1);
@@ -70,7 +64,7 @@ fn incorrect_key() {
     let plaintext = b"secret";
 
     let message = endec1
-        .enc(b"01234567890123456789012345678901", plaintext)
+        .enc::<32>(b"01234567890123456789012345678901", plaintext)
         .unwrap();
 
     let mut endec2 = Endec::new(0);
@@ -89,7 +83,7 @@ fn incorrect_nonce() {
     let plaintext = b"secret";
 
     let mut message = endec1
-        .enc(b"01234567890123456789012345678901", plaintext)
+        .enc::<32>(b"01234567890123456789012345678901", plaintext)
         .unwrap();
 
     message.nonce[0] += 1;
@@ -110,12 +104,12 @@ fn nonce_varies() {
     let plaintext = b"secret";
 
     let nonce1 = endec1
-        .enc(b"01234567890123456789012345678901", plaintext)
+        .enc::<32>(b"01234567890123456789012345678901", plaintext)
         .unwrap()
         .nonce;
 
     let nonce2 = endec1
-        .enc(b"01234567890123456789012345678901", plaintext)
+        .enc::<32>(b"01234567890123456789012345678901", plaintext)
         .unwrap()
         .nonce;
 
