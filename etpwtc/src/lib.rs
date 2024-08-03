@@ -54,7 +54,7 @@ impl Endec {
             nonce: self.counter.clone(),
             ciphertext: &self.scratch.as_slice(),
         };
-        increment_bytes(&mut self.counter, 1);
+        increment_nonce(&mut self.counter);
 
         Ok(message)
     }
@@ -78,19 +78,13 @@ impl Endec {
     }
 }
 
-fn increment_bytes(slice: &mut [u8], mut amount: u64) -> u64 {
-    let mut i = slice.len() - 1;
-
-    while amount > 0 {
-        amount += slice[i] as u64;
-        slice[i] = amount as u8;
-        amount /= 256;
-
-        if i == 0 {
-            break;
-        }
-        i -= 1;
+fn increment_nonce<const N: usize>(slice: &mut [u8; N]) {
+    let mut i = 0usize;
+    let mut carry = 1u64;
+    while carry > 0 && i < N {
+        carry += slice[i] as u64;
+        slice[i] = carry as u8;
+        carry /= 256;
+        i += 1;
     }
-
-    amount
 }
