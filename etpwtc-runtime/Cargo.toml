@@ -1,6 +1,6 @@
 [package]
 edition = "2021"
-name = "endec"
+name = "etpwtc-runtime"
 version = "1.0.0"
 license = "GPL-3.0"
 

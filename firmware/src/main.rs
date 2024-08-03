@@ -11,7 +11,7 @@ use debounce::{Debounced, Debouncy};
 use embassy_futures::select::{select4, Either4};
 use embassy_rp::gpio::{Input, Level, Output, Pin};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
-use endec::{heapless::Vec, Endec};
+use etpwtc::{heapless::Vec, Endec};
 use panic_probe as _;
 use secrets::{CODE_LENGTH, PASS_COUNT};
 
@@ -66,11 +66,11 @@ async fn main(spawner: embassy_executor::Spawner) {
         let key = slide_window(input, &mut code_window, &mut code_ix);
 
         match endec.dec(&key, &secrets::CODE_BUTTONS) {
-            Ok(buffer) if buffer.as_slice() == b"CODE_BUTTONS" => {
-                let mut i: u8 = 1;
+            Ok(buffer) if buffer.as_slice() == b"The quick brown fox jumps over the lazy dog." => {
+                let mut associated_data: u8 = 1; // index of calls to encrypted!()
                 passwords = secrets::PASS_WORDS.map(|secret| {
-                    let mut endec = Endec::new(i);
-                    i = i + 1;
+                    let mut endec = Endec::new(associated_data);
+                    associated_data = associated_data + 1;
                     endec.dec(&key, &secret).unwrap()
                 });
 
@@ -79,7 +79,7 @@ async fn main(spawner: embassy_executor::Spawner) {
                 break;
             }
             _ => (),
-        }
+        };
     }
 
     // extra app state: lock state, current selected password
@@ -128,8 +128,8 @@ async fn main(spawner: embassy_executor::Spawner) {
                 Ok(buffer)
                     if buffer.as_slice() == b"The quick brown fox jumps over the lazy dog." =>
                 {
-                    code_window = [0; CODE_LENGTH];
                     unlocked = true;
+                    code_window = [0; CODE_LENGTH];
                     LCD.send(lcd::Message::Unlock).await;
                 }
                 _ => {

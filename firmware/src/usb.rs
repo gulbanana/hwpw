@@ -14,7 +14,7 @@ use embassy_usb::{
     class::hid::{self, HidWriter},
     Builder, Config, Handler,
 };
-use endec::heapless::Vec;
+use etpwtc::heapless::Vec;
 use usbd_hid::descriptor::{KeyboardReport, KeyboardUsage::*, SerializedDescriptor};
 
 pub enum Message {

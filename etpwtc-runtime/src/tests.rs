@@ -1,6 +1,4 @@
-use chacha20poly1305::aead::heapless::Vec;
-
-use crate::{Endec, EndecError, Secret};
+use crate::{Endec, EndecError};
 
 #[test]
 fn roundtrip_same_instance() {

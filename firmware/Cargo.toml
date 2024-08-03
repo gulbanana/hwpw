@@ -5,7 +5,6 @@ version = "1.0.0"
 license = "GPL-3.0"
 
 [dependencies]
-endec = { path = "../endec" }
 etpwtc = { path = "../etpwtc" }
 
 embassy-embedded-hal = "0.1.0"

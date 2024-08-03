@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["firmware", "etpwtc"]
+members = ["firmware", "etpwtc", "etpwtc-runtime", "etpwtc-macros"]
 
 [profile.release]
 lto = true
