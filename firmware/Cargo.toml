@@ -5,7 +5,9 @@ version = "1.0.0"
 license = "GPL-3.0"
 
 [dependencies]
+endec = { path = "../endec" }
 etpwtc = { path = "../etpwtc" }
+
 embassy-embedded-hal = "0.1.0"
 embassy-executor = { version = "0.5.0", features = [
     "arch-cortex-m",

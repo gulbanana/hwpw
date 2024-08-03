@@ -11,6 +11,7 @@ use debounce::{Debounced, Debouncy};
 use embassy_futures::select::{select4, Either4};
 use embassy_rp::gpio::{Input, Level, Output, Pin};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+use endec::Endec;
 use panic_probe as _;
 use secrets::CODE_LENGTH;
 
@@ -45,11 +46,15 @@ async fn main(spawner: embassy_executor::Spawner) {
     // app state: current selected password, sliding window for unlock code
     let mut unlocked = false;
     let mut code_window = [0u8; CODE_LENGTH];
-    let mut cred_ix = 0;
+    let mut code_key = [0u8; 32];
     let mut code_ix = 0;
+    let mut cred_ix = 0;
 
     LCD.send(lcd::Message::SetName(&secrets::PASS_NAMES[cred_ix]))
         .await;
+
+    // an endec for the code
+    let mut code_endec = Endec::new(0);
 
     loop {
         let input = select4(
@@ -74,13 +79,19 @@ async fn main(spawner: embassy_executor::Spawner) {
                 }
                 Either4::Third(_) => {
                     let username = secrets::PASS_USERS[cred_ix];
-                    let password = secrets::PASS_WORDS[cred_ix];
-                    USB.send(usb::Message::Credentials { username, password })
-                        .await;
+                    USB.send(usb::Message::Credentials {
+                        username,
+                        password_ix: cred_ix,
+                        password_key: code_key.clone(),
+                    })
+                    .await;
                 }
                 Either4::Fourth(_) => {
-                    let password = secrets::PASS_WORDS[cred_ix];
-                    USB.send(usb::Message::Password { password }).await;
+                    USB.send(usb::Message::Password {
+                        password_ix: cred_ix,
+                        password_key: code_key.clone(),
+                    })
+                    .await;
                 }
             }
 
@@ -100,12 +111,25 @@ async fn main(spawner: embassy_executor::Spawner) {
                 .iter()
                 .chain(code_window[0..code_ix].iter());
 
-            if secrets::CODE_BUTTONS.iter().eq(sliding_window) {
-                code_window = [0; CODE_LENGTH];
-                unlocked = true;
-                LCD.send(lcd::Message::Unlock).await;
-            } else {
-                LCD.send(lcd::Message::Wake).await;
+            let mut sliding_bytes = [0u8; CODE_LENGTH];
+
+            let mut i = 0;
+            for b in sliding_window {
+                sliding_bytes[i] = *b;
+                i += 1;
+            }
+
+            code_key = Endec::make_key(&sliding_bytes);
+
+            match code_endec.dec(&code_key, &secrets::CODE_BUTTONS) {
+                Ok(b"CODE_BUTTONS") => {
+                    code_window = [0; CODE_LENGTH];
+                    unlocked = true;
+                    LCD.send(lcd::Message::Unlock).await;
+                }
+                _ => {
+                    LCD.send(lcd::Message::Wake).await;
+                }
             }
         }
     }

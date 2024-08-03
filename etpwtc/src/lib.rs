@@ -1,90 +1,88 @@
-#![no_std]
-
-#[cfg(test)]
-mod tests;
-
-use chacha20poly1305::{
-    aead::{heapless::Vec, AeadMutInPlace, KeyInit},
-    ChaCha20Poly1305, Nonce,
+extern crate proc_macro;
+use endec::{Endec, Secret};
+use proc_macro2::{Group, Punct, Spacing, TokenStream};
+use quote::{quote, ToTokens, TokenStreamExt};
+use syn::{
+    parse::{Parse, ParseStream},
+    parse_macro_input, LitByteStr, LitInt, Result, Token,
 };
 
-#[derive(Debug, PartialEq)]
-pub enum EndecError {
-    InvalidKeyLength,
-    InsufficientBufferCapacity,
-    DecryptionFailed,
+struct Encrypted {
+    key: LitByteStr,
+    context: LitInt,
+    plaintext: LitByteStr,
 }
 
-pub struct Endec {
-    scratch: Vec<u8, 64>, // enough for anybody
-    context: u8,          // prevents code replay,
-    counter: [u8; 12],    // generates unique nonces
+impl Parse for Encrypted {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let key: LitByteStr = input.parse()?;
+        input.parse::<Token![:]>()?;
+        let context: LitInt = input.parse()?;
+        input.parse::<Token![,]>()?;
+        let plaintext: LitByteStr = input.parse()?;
+        Ok(Encrypted {
+            key,
+            context,
+            plaintext,
+        })
+    }
 }
 
-pub struct Message<'a> {
-    pub nonce: [u8; 12],
-    pub ciphertext: &'a [u8],
-}
+struct ByteSlice<'a>(&'a [u8]);
 
-impl Endec {
-    pub fn new(associated_data: u8) -> Self {
-        Endec {
-            scratch: Vec::new(),
-            context: associated_data,
-            counter: [0; 12],
+impl ToTokens for ByteSlice<'_> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.append(Punct::new('&', Spacing::Joint));
+
+        let mut elements = TokenStream::new();
+        for b in self.0.iter() {
+            b.to_tokens(&mut elements);
+            elements.append(Punct::new(',', Spacing::Alone));
         }
-    }
 
-    pub fn enc(&mut self, key: &[u8; 32], plaintext: &[u8]) -> Result<Message, EndecError> {
-        let nonce = Nonce::clone_from_slice(&self.counter);
-
-        self.scratch.clear();
-        self.scratch
-            .extend_from_slice(plaintext)
-            .map_err(|_| EndecError::InsufficientBufferCapacity)?;
-
-        let mut cipher =
-            ChaCha20Poly1305::new_from_slice(key).map_err(|_| EndecError::InvalidKeyLength)?;
-
-        cipher
-            .encrypt_in_place(&nonce, &[self.context], &mut self.scratch)
-            .map_err(|_| EndecError::InsufficientBufferCapacity)?;
-
-        let message = Message {
-            nonce: self.counter.clone(),
-            ciphertext: &self.scratch.as_slice(),
-        };
-        increment_nonce(&mut self.counter);
-
-        Ok(message)
-    }
-
-    pub fn dec(&mut self, key: &[u8; 32], message: Message) -> Result<&[u8], EndecError> {
-        let nonce = Nonce::clone_from_slice(&message.nonce);
-
-        self.scratch.clear();
-        self.scratch
-            .extend_from_slice(message.ciphertext)
-            .map_err(|_| EndecError::InsufficientBufferCapacity)?;
-
-        let mut cipher =
-            ChaCha20Poly1305::new_from_slice(key).map_err(|_| EndecError::InvalidKeyLength)?;
-
-        cipher
-            .decrypt_in_place(&nonce, &[self.context], &mut self.scratch)
-            .map_err(|_| EndecError::DecryptionFailed)?;
-
-        Ok(&self.scratch.as_slice())
+        tokens.append(Group::new(proc_macro2::Delimiter::Bracket, elements));
     }
 }
 
-fn increment_nonce<const N: usize>(slice: &mut [u8; N]) {
-    let mut i = 0usize;
-    let mut carry = 1u64;
-    while carry > 0 && i < N {
-        carry += slice[i] as u64;
-        slice[i] = carry as u8;
-        carry /= 256;
-        i += 1;
+struct ByteArray<const N: usize>([u8; N]);
+
+impl<const N: usize> ToTokens for ByteArray<N> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let mut elements = TokenStream::new();
+        for b in self.0.iter() {
+            b.to_tokens(&mut elements);
+            elements.append(Punct::new(',', Spacing::Alone));
+        }
+
+        tokens.append(Group::new(proc_macro2::Delimiter::Bracket, elements));
     }
+}
+
+#[proc_macro]
+pub fn encrypted(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let Encrypted {
+        key,
+        context,
+        plaintext,
+    } = parse_macro_input!(input as Encrypted);
+
+    let mut endec = Endec::new(context.base10_parse().unwrap());
+    let Secret { nonce, ciphertext } = endec
+        .enc(
+            &Endec::make_key(key.value().as_slice()),
+            plaintext.value().as_slice(),
+        )
+        .unwrap();
+
+    let nonce = ByteArray(nonce);
+    let ciphertext = ByteSlice(ciphertext);
+
+    let output = quote! {
+        endec::Secret {
+            nonce: #nonce,
+            ciphertext: #ciphertext
+        }
+    };
+
+    output.into()
 }

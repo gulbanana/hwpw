@@ -5,9 +5,10 @@ version = "1.0.0"
 license = "GPL-3.0"
 
 [lib]
-doctest = false
+proc-macro = true
 
 [dependencies]
-chacha20poly1305 = { version = "0.10.1", default-features = false, features = [
-    "heapless",
-] }
+endec = { path = "../endec" }
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = "2.0"

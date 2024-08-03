@@ -1,6 +1,6 @@
 use chacha20poly1305::aead::heapless::Vec;
 
-use crate::{Endec, EndecError, Message};
+use crate::{Endec, EndecError, Secret};
 
 #[test]
 fn roundtrip_same_instance() {
@@ -13,13 +13,13 @@ fn roundtrip_same_instance() {
         .unwrap();
 
     let buffer: Vec<u8, 64> = Vec::from_slice(message.ciphertext).unwrap();
-    let message = Message {
+    let message = Secret {
         nonce: message.nonce,
         ciphertext: buffer.as_slice(),
     };
 
     let replaintext = endec
-        .dec(b"01234567890123456789012345678901", message)
+        .dec(b"01234567890123456789012345678901", &message)
         .unwrap();
 
     assert_eq!(plaintext, replaintext);
@@ -38,7 +38,7 @@ fn roundtrip_separate_instances() {
     let mut endec2 = Endec::new(0);
 
     let replaintext = endec2
-        .dec(b"01234567890123456789012345678901", message)
+        .dec(b"01234567890123456789012345678901", &message)
         .unwrap();
 
     assert_eq!(plaintext, replaintext);
@@ -57,7 +57,7 @@ fn incorrect_tag() {
     let mut endec2 = Endec::new(1);
 
     let err = endec2
-        .dec(b"01234567890123456789012345678901", message)
+        .dec(b"01234567890123456789012345678901", &message)
         .unwrap_err();
 
     assert_eq!(EndecError::DecryptionFailed, err);
@@ -76,7 +76,7 @@ fn incorrect_key() {
     let mut endec2 = Endec::new(0);
 
     let err = endec2
-        .dec(b"0123456789012345678901234567890x", message)
+        .dec(b"0123456789012345678901234567890x", &message)
         .unwrap_err();
 
     assert_eq!(EndecError::DecryptionFailed, err);
@@ -97,7 +97,7 @@ fn incorrect_nonce() {
     let mut endec2 = Endec::new(0);
 
     let err = endec2
-        .dec(b"0123456789012345678901234567890x", message)
+        .dec(b"0123456789012345678901234567890x", &message)
         .unwrap_err();
 
     assert_eq!(EndecError::DecryptionFailed, err);

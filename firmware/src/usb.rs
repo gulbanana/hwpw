@@ -1,4 +1,7 @@
-use crate::debounce::{Debounced, Debouncy};
+use crate::{
+    debounce::{Debounced, Debouncy},
+    secrets::PASS_WORDS,
+};
 use core::{
     future::Future,
     sync::atomic::{AtomicBool, Ordering},
@@ -14,15 +17,18 @@ use embassy_usb::{
     class::hid::{self, HidWriter},
     Builder, Config, Handler,
 };
+use endec::Endec;
 use usbd_hid::descriptor::{KeyboardReport, KeyboardUsage::*, SerializedDescriptor};
 
 pub enum Message {
     Credentials {
         username: &'static [u8],
-        password: &'static [u8],
+        password_ix: usize,
+        password_key: [u8; 32],
     },
     Password {
-        password: &'static [u8],
+        password_ix: usize,
+        password_key: [u8; 32],
     },
 }
 
@@ -75,13 +81,26 @@ pub async fn task(io: USB, msg: &'static Channel<CriticalSectionRawMutex, Messag
         let mut msg = Debounced::new(msg, 1200);
         loop {
             match msg.debounce().await {
-                Message::Credentials { username, password } => {
+                Message::Credentials {
+                    username,
+                    password_ix,
+                    password_key,
+                } => {
+                    let mut endec: Endec = Endec::new(password_ix as u8 + 1);
+                    let password = endec.dec(&password_key, &PASS_WORDS[password_ix]).unwrap();
+
                     keyboard.send_str(username).await;
                     keyboard.send_key(KeyboardTab as u8, false).await;
                     keyboard.send_str(password).await;
                     keyboard.send_key(KeyboardEnter as u8, false).await;
                 }
-                Message::Password { password } => {
+                Message::Password {
+                    password_ix,
+                    password_key,
+                } => {
+                    let mut endec: Endec = Endec::new(password_ix as u8 + 1);
+                    let password = endec.dec(&password_key, &PASS_WORDS[password_ix]).unwrap();
+
                     keyboard.send_str(password).await;
                     keyboard.send_key(KeyboardEnter as u8, false).await;
                 }
@@ -151,7 +170,7 @@ impl<'a> Keyboard<'a> {
         self.hid.write_serialize(&report).await.unwrap();
     }
 
-    async fn send_str(&mut self, value: &'static [u8]) {
+    async fn send_str(&mut self, value: &[u8]) {
         for char in value.iter() {
             let (keycode, shift) = match *char {
                 b' ' => (KeyboardSpacebar, false),
